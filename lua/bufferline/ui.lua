@@ -251,11 +251,19 @@ end
 --- @param focused boolean
 --- @param style table | string
 local function get_separator(focused, style)
-  if type(style) == "table" then return focused and style[1] or style[2] end
+  if type(style) == "table" then
+    if not (style[3] == "always") then return focused and style[1] or style[2] end
+  end
   ---@diagnostic disable-next-line: undefined-field
   local chars = sep_chars[style] or sep_chars.thin
   if is_slant(style) then return chars[1], chars[2] end
-  return focused and chars[1] or chars[2]
+  if style[3] == "always" then
+    return style[1], style[2]
+  elseif style[3] == "inner_only" then
+    return focused and style[1] or style[2]
+  else
+    return focused and chars[1] or chars[2]
+  end
 end
 
 --- @param buf_id number
@@ -341,7 +349,9 @@ local function add_separators(context)
   local style = options.separator_style
   local focused = context.tab:current() or context.tab:visible()
   local right_sep, left_sep = get_separator(focused, style)
-  local sep_hl = is_slant(style) and context.current_highlights.separator or hl.separator.hl_group
+  local sep_hl = (is_slant(style) or (style[3] == "always") or (style[3] == "inner_only"))
+      and context.current_highlights.separator
+    or hl.separator.hl_group
 
   local left_separator = left_sep and { text = left_sep, highlight = sep_hl } or nil
   local right_separator = { text = right_sep, highlight = sep_hl }
@@ -446,7 +456,8 @@ end
 ---@return integer
 local function get_tab_indicator(tab_indicators, options)
   local items, length = {}, 0
-  if not options.show_tab_indicators or #tab_indicators <= 1 then return items, length end
+  if not options.show_tab_indicators then return items, length end
+  if not (options.show_tab_indicators == "always") and #tab_indicators <= 1 then return items, length end
   for _, tab in ipairs(tab_indicators) do
     local component = tab.component
     table.insert(items, component)
@@ -539,6 +550,10 @@ local function to_tabline_str(component)
   component = component or {}
   local str = {}
   local globals = {}
+  local allowed_space = {
+    { pattern = "BufferLine*Icon*", before = false, after = true },
+    { pattern = "BufferLineModified", before = true, after = true },
+  }
   extend_highlight(component)
   for _, part in ipairs(component) do
     local attr = part.attr
@@ -551,6 +566,34 @@ local function to_tabline_str(component)
       ((attr and not attr.global) and attr.suffix or ""),
     })
   end
+
+  -- First, strip spaces from all tables
+  for i = 1, #str do
+    if str[i][3] == " " then str[i][3] = "" end
+  end
+
+  -- Now, add spaces based on the specified direction
+  for i = 1, #str do
+    local hl = str[i][1] or ""
+    for _, config in ipairs(allowed_space) do
+      local pattern = config.pattern
+      local lua_pattern = pattern:gsub("%*", ".*")
+
+      if hl:match(lua_pattern) then
+        -- Add space before (in previous table) if specified
+        if config.before and i > 1 and str[i - 1][3] == "" then str[i - 1][3] = " " end
+
+        -- Add space after (in next table) if specified
+        if config.after and i < #str and str[i + 1][3] == "" then str[i + 1][3] = " " end
+
+        -- Add space in current table if it's empty and neither before nor after is specified
+        if not config.before and not config.after and str[i][3] == "" then str[i][3] = " " end
+
+        break -- Once we've found a match, no need to check other patterns
+      end
+    end
+  end
+
   for _, attr in ipairs(globals) do
     table.insert(str, 1, attr[1])
     table.insert(str, #str + 1, attr[1])
