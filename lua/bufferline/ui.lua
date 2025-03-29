@@ -559,6 +559,31 @@ local function to_tabline_str(component)
       ((attr and not attr.global) and attr.suffix or ""),
     })
   end
+
+  local allowed_space = {
+    { pattern = "BufferLine*Icon*", before = false, after = true },
+    { pattern = "BufferLineModified", before = true, after = true },
+  }
+
+  for i = 1, #str do
+    if str[i][3] == " " then str[i][3] = "" end
+  end
+
+  for i = 1, #str do
+    local hl = str[i][1] or ""
+    for _, conf in ipairs(allowed_space) do
+      local pattern = conf.pattern
+      local lua_pattern = pattern:gsub("%*", ".*")
+
+      if hl:match(lua_pattern) then
+        if conf.before and i > 1 and str[i - 1][3] == "" then str[i - 1][3] = " " end
+        if conf.after and i < #str and str[i + 1][3] == "" then str[i + 1][3] = " " end
+        if not conf.before and not conf.after and str[i][3] == "" then str[i][3] = " " end
+        break
+      end
+    end
+  end
+
   for _, attr in ipairs(globals) do
     table.insert(str, 1, attr[1])
     table.insert(str, #str + 1, attr[1])
